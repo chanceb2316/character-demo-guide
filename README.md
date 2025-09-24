@@ -56,13 +56,13 @@ streamlit run guide_app.py
 
 `
 character-demo-guide/
-├── guide_app.py
-├── requirements.txt
-├── README.md
-├── elara_v1.json
-└── assets/
-    ├── placeholder1.png
-    └── placeholder2.png
+- guide_app.py
+- requirements.txt
+- README.md
+- elara_v1.json
+- assets/
+  - placeholder1.png
+  - placeholder2.png
 `
 
 ---
