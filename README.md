@@ -54,18 +54,15 @@ streamlit run guide_app.py
 
 ## 📁 Folder Structure
 
-`
-character-demo-guide/
-- guide_app.py
-- requirements.txt
-- README.md
-- elara_v1.json
-- assets/
-  - placeholder1.png
-  - placeholder2.png
-`
+#### character-demo-guide  
+├── guide_app.py  
+├── requirements.txt  
+├── README.md  
+├── elara_v1.json  
+├── assets/  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── placeholder1.png  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── placeholder2.png
 
----
 
 ## 🧠 Character Config
 
