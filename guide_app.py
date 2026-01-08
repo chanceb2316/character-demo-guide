@@ -1,143 +1,184 @@
 import streamlit as st
+import json
+import os
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Qdrant
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.docstore.document import Document
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
+import tempfile
+# Optional: for generation if key is provided
+from langchain_community.chat_models import ChatOpenAI
+from langchain.schema import SystemMessage, HumanMessage
 
-st.set_page_config(page_title="Character-Persistent AI Demo Guide", layout="wide")
+# Page Config
+st.set_page_config(page_title="Persona Cloning Tool", layout="wide")
 
-steps = {
-    "1. Preparing Character Assets": [
-        "Character JSON",
-        "Few-shot Samples",
-        "Reference Images/Videos"
-    ],
-    "2. Setting Up Free-Tier Infrastructure": [
-        "GitHub & Asset Hosting",
-        "Vector Memory (Qdrant)",
-        "Middleware (Vercel)"
-    ],
-    "3. Implementing Chat Persona": [
-        "System Prompt",
-        "Memory Integration",
-        "Consistency Checker"
-    ],
-    "4. Visual Consistency with Image Conditioning": [
-        "Stable Diffusion",
-        "Prompt Templates"
-    ],
-    "5. Avatar Video Generation": [
-        "LivePortrait/SadTalker",
-        "Colab Setup"
-    ],
-    "6. Assembling the Investor Demo": [
-        "Web Demo",
-        "Narrative Flow"
-    ]
-}
+# Session State Initialization
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+if "character_config" not in st.session_state:
+    st.session_state.character_config = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-selected_main = st.sidebar.selectbox("Select Step", list(steps.keys()))
-selected_sub = st.sidebar.selectbox("Select Sub-Step", steps[selected_main])
+# Sidebar for API Keys and Config
+st.sidebar.title("Configuration")
+openai_api_key = st.sidebar.text_input("OpenAI API Key (Optional)", type="password")
 
-st.title("🚀 Character-Persistent AI Demo Guide")
-st.markdown("This interactive guide walks you through building a consistent AI character across chat and video using lightweight, mostly free tools.")
+st.title("🤖 Persona Cloning & Interaction Tool")
+st.markdown("""
+This tool allows you to:
+1. **Define** a character persona.
+2. **Ingest** their past writings to learn their style ("Scan").
+3. **Interact** with the cloned persona using RAG (Retrieval Augmented Generation).
+""")
 
-def link(text, url):
-    st.markdown(f"[{text}]({url})")
+tabs = st.tabs(["1. Define Persona", "2. Ingest Data (Scan)", "3. Interact (Clone)", "4. Guide"])
 
-def show_visual(caption):
-    st.image(f"https://via.placeholder.com/600x300.png?text={caption.replace(' ', '+')}", caption=caption)
+# --- TAB 1: DEFINE PERSONA ---
+with tabs[0]:
+    st.header("Define Character Persona")
 
-def breakdown_button(step_name):
-    if st.button(f"🔎 Break down '{step_name}' in depth"):
-        st.markdown(f"### Detailed Breakdown: {step_name}")
-        st.info(f"Here you could expand with code snippets, diagrams, or deeper explanations for **{step_name}**.")
+    # Load default if nothing loaded
+    if st.session_state.character_config is None:
+        try:
+            with open("example.json", "r") as f:
+                st.session_state.character_config = json.load(f)
+        except:
+            st.session_state.character_config = {}
 
-st.header(f"{selected_main} → {selected_sub}")
+    # Editor
+    config_str = st.text_area("Character JSON Bible", value=json.dumps(st.session_state.character_config, indent=2), height=400)
 
-if selected_main == "1. Preparing Character Assets":
-    if selected_sub == "Character JSON":
-        st.markdown("Define your character's identity in a structured JSON format.")
-        link("JSON Schema", "https://json-schema.org")
-        show_visual("Character JSON Structure")
-        breakdown_button("Character JSON")
+    if st.button("Save Configuration"):
+        try:
+            st.session_state.character_config = json.loads(config_str)
+            st.success("Configuration saved!")
+        except json.JSONDecodeError:
+            st.error("Invalid JSON format.")
 
-    elif selected_sub == "Few-shot Samples":
-        st.markdown("Create dialogue and monologue samples to anchor your character's tone.")
-        show_visual("Few-shot Sample Examples")
-        breakdown_button("Few-shot Samples")
+# --- TAB 2: INGEST DATA ---
+with tabs[1]:
+    st.header("Ingest Data (Scan Style)")
+    st.markdown("Upload text files containing the person's past messages, blogs, or posts.")
 
-    elif selected_sub == "Reference Images/Videos":
-        st.markdown("Collect consistent portraits and short clips for visual conditioning.")
-        link("Instant-ID on Hugging Face", "https://huggingface.co/spaces/InstantX/InstantID")
-        show_visual("Reference Image Example")
-        breakdown_button("Reference Images/Videos")
+    uploaded_files = st.file_uploader("Upload Text Files", accept_multiple_files=True, type=['txt', 'md', 'json'])
 
-elif selected_main == "2. Setting Up Free-Tier Infrastructure":
-    if selected_sub == "GitHub & Asset Hosting":
-        st.markdown("Use GitHub to store your assets and host static files.")
-        link("GitHub", "https://github.com")
-        link("GitHub Pages", "https://pages.github.com")
-        show_visual("GitHub Repo Structure")
-        breakdown_button("GitHub & Asset Hosting")
+    if st.button("Process & Index"):
+        if not uploaded_files:
+            st.warning("Please upload files first.")
+        else:
+            with st.spinner("Processing files and building vector index... (This may take a moment)"):
+                documents = []
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
-    elif selected_sub == "Vector Memory (Qdrant)":
-        st.markdown("Use Qdrant Cloud to store and retrieve character memory snippets.")
-        link("Qdrant Cloud", "https://qdrant.tech")
-        show_visual("Qdrant Dashboard")
-        breakdown_button("Vector Memory (Qdrant)")
+                for uploaded_file in uploaded_files:
+                    # Read content
+                    content = uploaded_file.read().decode("utf-8")
+                    # Create document
+                    doc = Document(page_content=content, metadata={"source": uploaded_file.name})
+                    # Split
+                    chunks = text_splitter.split_documents([doc])
+                    documents.extend(chunks)
 
-    elif selected_sub == "Middleware (Vercel)":
-        st.markdown("Use Vercel Functions to route prompts and inject character context.")
-        link("Vercel", "https://vercel.com")
-        show_visual("Vercel Function Flow")
-        breakdown_button("Middleware (Vercel)")
+                if documents:
+                    # Initialize Embeddings (Local)
+                    # using a small model for speed in demo
+                    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-elif selected_main == "3. Implementing Chat Persona":
-    if selected_sub == "System Prompt":
-        st.markdown("Craft a hidden system prompt that enforces character traits and boundaries.")
-        show_visual("System Prompt Template")
-        breakdown_button("System Prompt")
+                    # Create Qdrant Collection in memory
+                    # For persistence, we would use path="local_qdrant"
+                    st.session_state.vector_store = Qdrant.from_documents(
+                        documents,
+                        embeddings,
+                        location=":memory:",  # In-memory for session duration
+                        collection_name="persona_style"
+                    )
+                    st.success(f"Successfully indexed {len(documents)} chunks from {len(uploaded_files)} files.")
+                else:
+                    st.warning("No text content found.")
 
-    elif selected_sub == "Memory Integration":
-        st.markdown("Fetch top memory snippets from vector DB and inject into prompt.")
-        show_visual("Memory Injection Flow")
-        breakdown_button("Memory Integration")
+# --- TAB 3: INTERACT ---
+with tabs[2]:
+    st.header("Chat with Cloned Persona")
 
-    elif selected_sub == "Consistency Checker":
-        st.markdown("Run a second LLM pass to score and regenerate off-character replies.")
-        show_visual("Consistency Check Logic")
-        breakdown_button("Consistency Checker")
+    if st.session_state.vector_store is None:
+        st.warning("⚠ No data ingested yet. Please go to the 'Ingest Data' tab and upload content first.")
 
-elif selected_main == "4. Visual Consistency with Image Conditioning":
-    if selected_sub == "Stable Diffusion":
-        st.markdown("Use Instant-ID or IP-Adapter to condition image generation on reference photos.")
-        link("IP-Adapter on Hugging Face", "https://huggingface.co/spaces/h94/IP-Adapter")
-        show_visual("Stable Diffusion Conditioning")
-        breakdown_button("Stable Diffusion")
+    # Chat Interface
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    elif selected_sub == "Prompt Templates":
-        st.markdown("Use structured prompts to guide consistent visual generation.")
-        show_visual("Image Prompt Template")
-        breakdown_button("Prompt Templates")
+    if prompt := st.chat_input("Say something..."):
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-elif selected_main == "5. Avatar Video Generation":
-    if selected_sub == "LivePortrait/SadTalker":
-        st.markdown("Use free Colab notebooks to generate talking-head videos from portraits and audio.")
-        link("LivePortrait GitHub", "https://github.com/KwaiVGI/LivePortrait")
-        link("SadTalker GitHub", "https://github.com/OpenTalker/SadTalker")
-        show_visual("Avatar Video Output")
-        breakdown_button("LivePortrait/SadTalker")
+        # Generate Response
+        with st.chat_message("assistant"):
+            if st.session_state.vector_store:
+                # 1. Retrieve Context
+                docs = st.session_state.vector_store.similarity_search(prompt, k=3)
+                context_text = "\n\n".join([d.page_content for d in docs])
 
-    elif selected_sub == "Colab Setup":
-        st.markdown("Run video generation notebooks on free Colab GPU instances.")
-        link("Google Colab", "https://colab.research.google.com")
-        show_visual("Colab Notebook Example")
-        breakdown_button("Colab Setup")
+                # 2. Construct System Prompt
+                char_name = st.session_state.character_config.get("name", "AI")
+                traits = ", ".join(st.session_state.character_config.get("core_traits", []))
+                style = st.session_state.character_config.get("speech_style", {})
 
-elif selected_main == "6. Assembling the Investor Demo":
-    if selected_sub == "Web Demo":
-        st.markdown("Build a simple web interface to showcase chat and video outputs.")
-        show_visual("Web Demo UI")
-        breakdown_button("Web Demo")
+                system_prompt = f"""You are {char_name}.
+Traits: {traits}
+Speaking Style: {style}
 
-    elif selected_sub == "Narrative Flow":
-        st.markdown("Design a short story arc that highlights your character's consistency.")
-        show_visual("Narrative Flow Diagram")
-        breakdown_button("Narrative Flow")
+Below are some examples of your past writing/speaking (Context):
+---
+{context_text}
+---
+
+Reply to the user's message in your style, using the context if relevant.
+"""
+
+                # 3. Call LLM if key exists, else Mock
+                response_text = ""
+                if openai_api_key:
+                    try:
+                        llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=0.7)
+                        msgs = [
+                            SystemMessage(content=system_prompt),
+                            HumanMessage(content=prompt)
+                        ]
+                        res = llm(msgs)
+                        response_text = res.content
+                    except Exception as e:
+                        response_text = f"Error calling OpenAI: {e}"
+                else:
+                    response_text = "**(Simulation Mode - No API Key)**\n\n"
+                    response_text += f"**System Prompt Constructed:**\n\n```\n{system_prompt}\n```\n\n"
+                    response_text += "**What would happen:** The LLM would use the `Context` chunks above (which are retrieved from your uploaded files) to mimic the style and content of the persona."
+
+                st.markdown(response_text)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+
+            else:
+                st.error("Please ingest data first.")
+
+# --- TAB 4: GUIDE ---
+with tabs[3]:
+    st.markdown("### Original Guide Content")
+    st.markdown("Use this reference to understand the broader pipeline.")
+
+    # (Original Guide Logic Preserved lightly)
+    steps = {
+        "1. Preparing Assets": "Define JSON and gather samples.",
+        "2. Infrastructure": "Setup vector DBs and hosting.",
+        "3. Chat Persona": "Prompt engineering and RAG.",
+        "4. Visuals": "Stable Diffusion and LoRAs.",
+        "5. Voice/Video": "ElevenLabs and SadTalker."
+    }
+
+    st.json(steps)
+    st.info("The tabs above implement the 'Chat Persona' and 'Infrastructure' parts of this guide directly in your browser!")

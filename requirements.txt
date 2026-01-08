@@ -2,3 +2,6 @@ streamlit
 qrcode[pil]
 sentence-transformers
 qdrant-client
+langchain
+langchain-community
+openai
